@@ -83,7 +83,6 @@ fun RolGate(onSalir: () -> Unit) {
         error = null
         FirebaseFirestore.getInstance().collection("usuarios").document(uid).get()
             .addOnSuccessListener { doc ->
-                android.util.Log.d("Rol", "uid=$uid existe=${doc.exists()} rol=[${doc.getString("rol")}]")
                 val r = doc.getString("rol")?.trim()?.lowercase()
                 if (r == "admin" || r == "trabajador") {
                     rol = r
@@ -195,6 +194,12 @@ fun MainScreen(rol: String, onSalir: () -> Unit) {
     var tab by remember { mutableIntStateOf(0) }
     var ultimo by remember { mutableStateOf(eventosEjemplo.first()) }
 
+    // Control de acceso en la interfaz: solo el administrador ve la pestaña Usuarios.
+    // (La protección real de los datos se hará con reglas de Firestore.)
+    val esAdmin = rol == "admin"
+    val pestanas = if (esAdmin) listOf("Monitoreo", "Control", "Historial", "Usuarios")
+    else listOf("Monitoreo", "Control", "Historial")
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -209,21 +214,13 @@ fun MainScreen(rol: String, onSalir: () -> Unit) {
         },
         bottomBar = {
             NavigationBar {
-                NavigationBarItem(
-                    selected = tab == 0, onClick = { tab = 0 },
-                    icon = {},
-                    label = { Text("Monitoreo") }
-                )
-                NavigationBarItem(
-                    selected = tab == 1, onClick = { tab = 1 },
-                    icon = {},
-                    label = { Text("Control") }
-                )
-                NavigationBarItem(
-                    selected = tab == 2, onClick = { tab = 2 },
-                    icon = {},
-                    label = { Text("Historial") }
-                )
+                pestanas.forEachIndexed { i, nombre ->
+                    NavigationBarItem(
+                        selected = tab == i, onClick = { tab = i },
+                        icon = {},
+                        label = { Text(nombre) }
+                    )
+                }
             }
         }
     ) { padding ->
@@ -235,7 +232,9 @@ fun MainScreen(rol: String, onSalir: () -> Unit) {
                     onSimular = { ultimo = if (ultimo.seDetuvo) eventosEjemplo[0] else eventosEjemplo[1] }
                 )
                 1 -> ControlScreen()
-                else -> HistorialScreen()
+                2 -> HistorialScreen()
+                3 -> if (esAdmin) UsuariosScreen()
+                else -> {}
             }
         }
     }
@@ -417,6 +416,68 @@ fun HistorialScreen() {
                         Text("${e.velocidadCms} cm/s", fontWeight = FontWeight.Bold)
                     }
                 }
+            }
+        }
+    }
+}
+
+// ---------- 5. Usuarios (solo administrador) ----------
+// Por ahora es solo el diseño: crear la cuenta de verdad se implementa en el siguiente paso.
+@Composable
+fun UsuariosScreen() {
+    var nombre by remember { mutableStateOf("") }
+    var correo by remember { mutableStateOf("") }
+    var clave by remember { mutableStateOf("") }
+    var rolNuevo by remember { mutableStateOf("trabajador") }
+    var aviso by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Nueva cuenta (trabajador o administrador)", fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = nombre, onValueChange = { nombre = it },
+                    label = { Text("Nombre completo") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = correo, onValueChange = { correo = it },
+                    label = { Text("Correo electrónico") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = clave, onValueChange = { clave = it },
+                    label = { Text("Contraseña temporal") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("Rol", fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = rolNuevo == "trabajador", onClick = { rolNuevo = "trabajador" },
+                        label = { Text("Trabajador") }
+                    )
+                    FilterChip(
+                        selected = rolNuevo == "admin", onClick = { rolNuevo = "admin" },
+                        label = { Text("Administrador") }
+                    )
+                }
+                Text(
+                    if (rolNuevo == "trabajador") "El trabajador ve Monitoreo, Control e Historial, pero no puede crear cuentas."
+                    else "El administrador tiene acceso total, incluida la creación de cuentas.",
+                    fontSize = 13.sp
+                )
+                aviso?.let { Text(it, fontSize = 13.sp) }
+                Button(
+                    onClick = { aviso = "Pendiente: la creación real de cuentas se implementa en el siguiente paso." },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Crear cuenta", fontSize = 16.sp) }
             }
         }
     }
