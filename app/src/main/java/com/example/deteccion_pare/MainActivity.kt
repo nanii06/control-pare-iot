@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 // ---------- Colores y datos de ejemplo ----------
 private val Verde = Color(0xFF1B7F4B)
@@ -49,15 +50,72 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ---------- Raíz: Login -> pantalla principal ----------
+// ---------- Raíz: Login -> lectura del rol -> pantalla principal ----------
 @Composable
 fun PareApp() {
-    var logueado by remember { mutableStateOf(FirebaseAuth.getInstance().currentUser != null) }
-    if (!logueado) LoginScreen(onLogin = { logueado = true })
-    else MainScreen(onSalir = {
-        FirebaseAuth.getInstance().signOut()
-        logueado = false
-    })
+    var sesion by remember { mutableStateOf(FirebaseAuth.getInstance().currentUser != null) }
+    if (!sesion) {
+        LoginScreen(onLogin = { sesion = true })
+    } else {
+        RolGate(onSalir = {
+            FirebaseAuth.getInstance().signOut()
+            sesion = false
+        })
+    }
+}
+
+// Lee el rol del usuario desde Firestore: colección "usuarios", documento = UID
+@Composable
+fun RolGate(onSalir: () -> Unit) {
+    var rol by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var cargando by remember { mutableStateOf(true) }
+    var intento by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(intento) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid == null) {
+            error = "No hay una sesión activa."
+            cargando = false
+            return@LaunchedEffect
+        }
+        cargando = true
+        error = null
+        FirebaseFirestore.getInstance().collection("usuarios").document(uid).get()
+            .addOnSuccessListener { doc ->
+                android.util.Log.d("Rol", "uid=$uid existe=${doc.exists()} rol=[${doc.getString("rol")}]")
+                val r = doc.getString("rol")?.trim()?.lowercase()
+                if (r == "admin" || r == "trabajador") {
+                    rol = r
+                } else {
+                    error = "Tu cuenta no tiene un rol válido. Habla con el administrador."
+                }
+                cargando = false
+            }
+            .addOnFailureListener { e ->
+                android.util.Log.w("Rol", "No se pudo leer el rol", e)
+                error = "No se pudo leer tu perfil. Revisa tu conexión."
+                cargando = false
+            }
+    }
+
+    val rolActual = rol
+    when {
+        cargando -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        rolActual != null -> MainScreen(rol = rolActual, onSalir = onSalir)
+        else -> Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(error ?: "Ocurrió un error.", color = Rojo)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = { intento++ }) { Text("Reintentar") }
+            TextButton(onClick = onSalir) { Text("Salir") }
+        }
+    }
 }
 
 // ---------- 1. Login con Firebase Authentication ----------
@@ -133,14 +191,19 @@ fun LoginScreen(onLogin: () -> Unit) {
 // ---------- Pantalla principal con barra inferior ----------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(onSalir: () -> Unit) {
+fun MainScreen(rol: String, onSalir: () -> Unit) {
     var tab by remember { mutableIntStateOf(0) }
     var ultimo by remember { mutableStateOf(eventosEjemplo.first()) }
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Control PARE", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Control PARE", fontWeight = FontWeight.Bold)
+                        Text(if (rol == "admin") "Administrador" else "Trabajador", fontSize = 12.sp)
+                    }
+                },
                 actions = { TextButton(onClick = onSalir) { Text("Salir") } }
             )
         },
